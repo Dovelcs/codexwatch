@@ -1,0 +1,270 @@
+{
+  "profile_id": "codex-0.144.1-linux-x86_64",
+  "codex_version": "0.144.1",
+  "elf_sha256": "a96f944d1a596dbfb7fdd84f482be5c50e34b04bb371126840d873e4ebf26902",
+  "architecture": "x86_64",
+  "debuglink_name": "codex.debug",
+  "debuglink_crc32": 4024315660,
+  "validated": false,
+  "kernel_hooks": [
+    {
+      "program": "process_exec",
+      "attach_kind": "tracepoint",
+      "target": "sched",
+      "target_detail": "sched_process_exec"
+    },
+    {
+      "program": "process_exit",
+      "attach_kind": "tracepoint",
+      "target": "sched",
+      "target_detail": "sched_process_exit"
+    },
+    {
+      "program": "tcp_state",
+      "attach_kind": "kprobe",
+      "target": "tcp_set_state"
+    }
+  ],
+  "probes": {
+    "plaintext_write": [
+      {
+        "program": "plaintext_write_enter",
+        "attach_kind": "uprobe",
+        "symbol": "<rustls::conn::ConnectionCommon<T> as rustls::conn::connection::PlaintextSink>::write",
+        "file_offset": 41890992,
+        "signature": {
+          "file_offset": 41890992,
+          "mask_hex": "ffffffffffffffffffffffffffffffffffffffffffffffff",
+          "bytes_hex": "4156534883ec484989fe4889742410488954241848c74424"
+        },
+        "argument_abi": "self=rdi,buf=rsi,len=rdx",
+        "layout": {
+          "self_argument": 0,
+          "buf_argument": 1,
+          "len_argument": 2,
+          "return_tag_register": "rax",
+          "return_len_register": "rdx",
+          "return_encoding": "result_usize_rax_rdx"
+        }
+      },
+      {
+        "program": "plaintext_write_return",
+        "attach_kind": "uretprobe",
+        "symbol": "<rustls::conn::ConnectionCommon<T> as rustls::conn::connection::PlaintextSink>::write",
+        "file_offset": 41890992,
+        "signature": {
+          "file_offset": 41890992,
+          "mask_hex": "ffffffffffffffffffffffffffffffffffffffffffffffff",
+          "bytes_hex": "4156534883ec484989fe4889742410488954241848c74424"
+        },
+        "argument_abi": "ret_tag=rax,ret_len=rdx",
+        "layout": {
+          "return_tag_register": "rax",
+          "return_len_register": "rdx",
+          "return_encoding": "result_usize_rax_rdx"
+        }
+      },
+      {
+        "program": "plaintext_write_enter_alt",
+        "attach_kind": "uprobe",
+        "symbol": "<rustls::conn::ConnectionCommon<T> as rustls::conn::connection::PlaintextSink>::write",
+        "file_offset": 41891104,
+        "signature": {
+          "file_offset": 41891104,
+          "mask_hex": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "bytes_hex": "4156534883ec484989fe4889742410488954241848c744240800000000488d97"
+        },
+        "argument_abi": "self=rdi,buf=rsi,len=rdx",
+        "layout": {
+          "self_argument": 0,
+          "buf_argument": 1,
+          "len_argument": 2,
+          "return_tag_register": "rax",
+          "return_len_register": "rdx",
+          "return_encoding": "result_usize_rax_rdx"
+        }
+      },
+      {
+        "program": "plaintext_write_return_alt",
+        "attach_kind": "uretprobe",
+        "symbol": "<rustls::conn::ConnectionCommon<T> as rustls::conn::connection::PlaintextSink>::write",
+        "file_offset": 41891104,
+        "signature": {
+          "file_offset": 41891104,
+          "mask_hex": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "bytes_hex": "4156534883ec484989fe4889742410488954241848c744240800000000488d97"
+        },
+        "argument_abi": "ret_tag=rax,ret_len=rdx",
+        "layout": {
+          "return_tag_register": "rax",
+          "return_len_register": "rdx",
+          "return_encoding": "result_usize_rax_rdx"
+        }
+      }
+    ],
+    "plaintext_read": [
+      {
+        "program": "plaintext_read_enter_candidate",
+        "attach_kind": "uprobe",
+        "symbol": "<rustls::conn::connection::Reader as std::io::Read>::read",
+        "file_offset": 189820768,
+        "signature": {
+          "file_offset": 189820768,
+          "mask_hex": "ffffffffffffffffffffffffffffffffffffffffffffffff",
+          "bytes_hex": "415653504989d64889fb488b3fe86e8d04004889c1b80100"
+        },
+        "argument_abi": "self=rdi,buf=rsi,len=rdx",
+        "layout": {
+          "self_argument": 0,
+          "buf_argument": 1,
+          "len_argument": 2
+        }
+      },
+      {
+        "program": "plaintext_read_return_candidate",
+        "attach_kind": "uretprobe",
+        "symbol": "<rustls::conn::connection::Reader as std::io::Read>::read",
+        "file_offset": 189820768,
+        "signature": {
+          "file_offset": 189820768,
+          "mask_hex": "ffffffffffffffffffffffffffffffffffffffffffffffff",
+          "bytes_hex": "415653504989d64889fb488b3fe86e8d04004889c1b80100"
+        },
+        "argument_abi": "candidate_return_regs=rax,rdx",
+        "layout": {
+          "return_tag_register": "rax",
+          "return_len_register": "rdx"
+        }
+      }
+    ],
+    "turn_complete_serialize_candidate": [
+      {
+        "program": "turn_complete_serialize",
+        "attach_kind": "uprobe",
+        "symbol": "codex_protocol::protocol::_::<impl serde_core::ser::Serialize for codex_protocol::protocol::TurnCompleteEvent>::serialize",
+        "file_offset": 25038128,
+        "signature": {
+          "file_offset": 25038128,
+          "mask_hex": "ffffffffffffffffffffffffffffffffffffffffffffffff",
+          "bytes_hex": "554157415641554154534881ec480100004989d74989f648"
+        },
+        "argument_abi": "sret=rdi,self=rsi,serializer=rdx",
+        "layout": {
+          "self_argument": 1,
+          "fields": [
+            {
+              "name": "completed_at",
+              "offset": 0,
+              "encoding": "option_i64"
+            },
+            {
+              "name": "duration_ms",
+              "offset": 16,
+              "encoding": "option_i64"
+            },
+            {
+              "name": "time_to_first_token_ms",
+              "offset": 32,
+              "encoding": "option_i64"
+            },
+            {
+              "name": "turn_id",
+              "offset": 48,
+              "encoding": "string_ptr_len_cap"
+            },
+            {
+              "name": "last_agent_message",
+              "offset": 72,
+              "encoding": "option_string_ptr_len_cap"
+            }
+          ]
+        }
+      }
+    ],
+    "turn_aborted_serialize_candidate": [
+      {
+        "program": "turn_aborted_serialize",
+        "attach_kind": "uprobe",
+        "symbol": "codex_protocol::protocol::_::<impl serde_core::ser::Serialize for codex_protocol::protocol::TurnAbortedEvent>::serialize",
+        "file_offset": 25122144,
+        "signature": {
+          "file_offset": 25122144,
+          "mask_hex": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "bytes_hex": "554157415641554154534881ec280100004989d74989f64889fb49bc02000000"
+        },
+        "argument_abi": "sret=rdi,self=rsi,serializer=rdx",
+        "layout": {
+          "self_argument": 1,
+          "fields": [
+            {
+              "name": "completed_at",
+              "offset": 0,
+              "encoding": "option_i64"
+            },
+            {
+              "name": "duration_ms",
+              "offset": 16,
+              "encoding": "option_i64"
+            },
+            {
+              "name": "turn_id",
+              "offset": 32,
+              "encoding": "option_string_ptr_len_cap"
+            },
+            {
+              "name": "reason",
+              "offset": 56,
+              "encoding": "u8_discriminant"
+            }
+          ]
+        }
+      }
+    ],
+    "turn_error_serialize_candidate": [
+      {
+        "program": "turn_error_serialize",
+        "attach_kind": "uprobe",
+        "symbol": "codex_app_server_protocol::protocol::v2::thread_data::_::<impl serde_core::ser::Serialize for codex_app_server_protocol::protocol::v2::thread_data::TurnError>::serialize",
+        "file_offset": 25735664,
+        "signature": {
+          "file_offset": 25735664,
+          "mask_hex": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "bytes_hex": "41574156534883ec304889fb4c8b36498b46104939060f8403010000498b4e08"
+        },
+        "argument_abi": "self=rdi,serializer=rsi",
+        "layout": {
+          "self_argument": 0,
+          "fields": [
+            {
+              "name": "message",
+              "offset": 0,
+              "encoding": "string_ptr_len_cap"
+            },
+            {
+              "name": "additional_details",
+              "offset": 24,
+              "encoding": "option_string_ptr_len_cap"
+            },
+            {
+              "name": "codex_error_info",
+              "offset": 48,
+              "encoding": "codex_error_info_option"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "evidence": [
+    "native ELF path resolved from npm wrapper to @openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex",
+    "native ELF sha256 matches a96f944d1a596dbfb7fdd84f482be5c50e34b04bb371126840d873e4ebf26902",
+    "native ELF debuglink is codex.debug with CRC32 0xefde2f0c",
+    "official rust-v0.144.1 symbols archive provides matching codex.debug",
+    "turn_complete, turn_aborted, and turn_error field offsets were derived from exact 0.144.1 serializer disassembly against the matching ELF/debug pair",
+    "plaintext_write candidate sites were derived from the exact 0.144.1 symbol table plus native ELF disassembly",
+    "reader-read candidate site 0xb506f60 was cross-checked against the exact native ELF first bytes 41 56 53 50 49 89 d6 48 89 fb 48 8b 3f e8 6e 8d",
+    "plaintext_read remains unresolved for validation: Reader::read return ABI has not yet been proven on this build, so only raw return-register capture is safe",
+    "real turn construction path was identified in codex-rs/core/src/tasks/mod.rs around EventMsg::TurnComplete/EventMsg::TurnAborted and emission path in codex-rs/core/src/session/mod.rs send_event, but no unique attachable concrete terminal probe site was proven yet",
+    "multiple write and lifecycle monomorphizations exist; without path-level trigger confirmation this profile must remain fail-closed"
+  ]
+}

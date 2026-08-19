@@ -1,0 +1,26 @@
+[Unit]
+Description=CodexWatch passive capture client
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+EnvironmentFile=-/etc/codexwatch/client.env
+ExecStart=/usr/local/bin/codexwatch-client daemon
+Restart=on-failure
+RestartSec=3s
+StateDirectory=codexwatch-client
+RuntimeDirectory=codexwatch-client
+UMask=0077
+NoNewPrivileges=true
+CapabilityBoundingSet=CAP_BPF CAP_PERFMON CAP_NET_RAW CAP_NET_ADMIN CAP_SYS_ADMIN CAP_SYS_RESOURCE CAP_IPC_LOCK
+AmbientCapabilities=CAP_BPF CAP_PERFMON CAP_NET_RAW CAP_NET_ADMIN CAP_SYS_ADMIN CAP_SYS_RESOURCE CAP_IPC_LOCK
+ProtectHome=read-only
+ProtectSystem=strict
+ReadWritePaths=/var/lib/codexwatch-client /run/codexwatch-client
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

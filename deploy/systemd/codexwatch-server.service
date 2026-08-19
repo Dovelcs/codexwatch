@@ -1,0 +1,21 @@
+[Unit]
+Description=CodexWatch metadata server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+DynamicUser=true
+EnvironmentFile=-/etc/codexwatch/server.env
+ExecStart=/usr/local/bin/codexwatch-server serve
+Restart=on-failure
+RestartSec=3s
+StateDirectory=codexwatch-server
+UMask=0077
+NoNewPrivileges=true
+ProtectHome=true
+ProtectSystem=strict
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

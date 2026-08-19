@@ -1,0 +1,21 @@
+[package]
+name = "codexwatch-capture-ebpf-programs"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+aya-ebpf = "0.1.1"
+aya-ebpf-macros = "0.1.2"
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+
+[workspace]

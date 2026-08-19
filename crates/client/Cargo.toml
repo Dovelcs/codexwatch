@@ -1,0 +1,38 @@
+[package]
+name = "codexwatch-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+bytes.workspace = true
+clap.workspace = true
+http.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+time.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+uuid.workspace = true
+zstd.workspace = true
+codexwatch-protocol = { path = "../protocol" }
+brotli = "8.0"
+flate2 = "1.1"
+hpack = "0.3.0"
+httparse = "1.10"
+afpacket = "0.2.3"
+etherparse = "0.19"
+codexwatch-capture-ebpf = { path = "../capture-ebpf" }
+
+[dev-dependencies]
+axum.workspace = true
+tempfile = "3.21"
+
+[lints]
+workspace = true
