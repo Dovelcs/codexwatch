@@ -584,9 +584,11 @@ async fn process_exit_marks_associated_active_task_lost() {
     let service = ClientService::open(cfg.clone()).await.expect("service");
     let mut lane = LiveCaptureLane::new(cfg.clone(), service.store().clone());
     let process_instance_id = Uuid::now_v7();
+    let request = request_bytes("turn");
+    let client_fin_sequence = 7000 + u32::try_from(request.len()).expect("request length");
 
     lane.ingest_input(CaptureInput::AttributedTcpSegment {
-        segment: match segment(50006, 8080, 7000, false, false, request_bytes("turn")) {
+        segment: match segment(50006, 8080, 7000, false, false, request) {
             CaptureInput::TcpSegment(segment) => segment,
             _ => unreachable!(),
         },
@@ -605,6 +607,16 @@ async fn process_exit_marks_associated_active_task_lost() {
     })
     .await
     .expect("response");
+    lane.ingest_input(CaptureInput::AttributedTcpSegment {
+        segment: match segment(50006, 8080, client_fin_sequence, false, true, Vec::new()) {
+            CaptureInput::TcpSegment(segment) => segment,
+            _ => unreachable!(),
+        },
+        process_instance_id,
+        direction: ProcessFlowDirection::LocalToRemote,
+    })
+    .await
+    .expect("flow close");
 
     lane.ingest_input(CaptureInput::ProcessExit {
         process: codexwatch_client::ProcessSummary {

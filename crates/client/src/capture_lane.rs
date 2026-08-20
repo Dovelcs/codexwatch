@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeSet, HashMap, VecDeque},
+    collections::{BTreeSet, HashMap, HashSet, VecDeque},
     fs,
     path::PathBuf,
     sync::{Arc, RwLock},
@@ -559,6 +559,7 @@ pub struct LiveCaptureLane {
     config: ClientConfig,
     store: ClientStore,
     flows: HashMap<FlowKey, FlowState>,
+    process_tasks: HashMap<Uuid, HashSet<TaskKey>>,
 }
 
 impl LiveCaptureLane {
@@ -568,6 +569,7 @@ impl LiveCaptureLane {
             config,
             store,
             flows: HashMap::new(),
+            process_tasks: HashMap::new(),
         }
     }
 
@@ -612,13 +614,21 @@ impl LiveCaptureLane {
                 contents: Vec::new(),
             })),
             CaptureInput::ProcessExit { process } => {
-                let tasks = self
-                    .flows
-                    .values()
-                    .filter(|flow| flow.process_instance_id == Some(process.process_instance_id))
-                    .filter_map(|flow| flow.current_task.clone())
-                    .collect();
-                let batch = self.project_process_exit(process, tasks).await?;
+                let mut tasks = self
+                    .process_tasks
+                    .remove(&process.process_instance_id)
+                    .unwrap_or_default();
+                tasks.extend(
+                    self.flows
+                        .values()
+                        .filter(|flow| {
+                            flow.process_instance_id == Some(process.process_instance_id)
+                        })
+                        .filter_map(|flow| flow.current_task.clone()),
+                );
+                let batch = self
+                    .project_process_exit(process, tasks.into_iter().collect())
+                    .await?;
                 Ok((!batch.is_empty()).then_some(batch))
             }
         }
@@ -884,7 +894,8 @@ impl LiveCaptureLane {
             };
             let projected = self.project_exchange(exchange).await?;
             if let Some(task) = projected.records.iter().find_map(summary_record_task) {
-                state.current_task = Some(task);
+                state.current_task = Some(task.clone());
+                self.associate_task(state.process_instance_id, task);
             }
             batch.records.extend(projected.records);
             batch.contents.extend(projected.contents);
@@ -980,7 +991,8 @@ impl LiveCaptureLane {
             };
             let projected = self.project_exchange(exchange).await?;
             if let Some(task) = projected.records.iter().find_map(summary_record_task) {
-                state.current_task = Some(task);
+                state.current_task = Some(task.clone());
+                self.associate_task(state.process_instance_id, task);
             }
             batch.records.extend(projected.records);
             batch.contents.extend(projected.contents);
@@ -1054,7 +1066,8 @@ impl LiveCaptureLane {
                             if let Some(task) =
                                 projected.records.iter().find_map(summary_record_task)
                             {
-                                state.current_task = Some(task);
+                                state.current_task = Some(task.clone());
+                                self.associate_task(state.process_instance_id, task);
                             }
                             batch.records.extend(projected.records);
                             batch.contents.extend(projected.contents);
@@ -1065,6 +1078,15 @@ impl LiveCaptureLane {
             }
         }
         Ok(())
+    }
+
+    fn associate_task(&mut self, process_instance_id: Option<Uuid>, task: TaskKey) {
+        if let Some(process_instance_id) = process_instance_id {
+            self.process_tasks
+                .entry(process_instance_id)
+                .or_default()
+                .insert(task);
+        }
     }
 
     async fn project_exchange(&self, exchange: DecodedExchange) -> Result<CaptureBatch> {
@@ -1290,6 +1312,9 @@ impl LiveCaptureLane {
             let Some(cursor) = self.store.load_task_cursor(&task).await? else {
                 continue;
             };
+            if cursor.phase == TaskPhase::Terminal {
+                continue;
+            }
             let (outcome, error) =
                 if process.signal.is_some() || process.exit_code.is_some_and(|code| code != 0) {
                     (
