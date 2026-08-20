@@ -694,6 +694,48 @@ async fn attributed_server_packet_before_request_keeps_flow_direction() {
 }
 
 #[tokio::test]
+async fn duplicate_response_id_does_not_create_another_attempt() {
+    let dir = TempDir::new().expect("tmp");
+    let cfg = config(&dir);
+    let service = ClientService::open(cfg.clone()).await.expect("service");
+    let mut lane = LiveCaptureLane::new(cfg, service.store().clone());
+
+    for (local_port, request_sequence, response_sequence) in
+        [(50010, 11_000, 21_000), (50011, 12_000, 22_000)]
+    {
+        lane.ingest_input(segment(
+            local_port,
+            8080,
+            request_sequence,
+            false,
+            false,
+            request_bytes("turn"),
+        ))
+        .await
+        .expect("request");
+        lane.ingest_input(segment(
+            8080,
+            local_port,
+            response_sequence,
+            false,
+            false,
+            completed_response_bytes(),
+        ))
+        .await
+        .expect("response");
+    }
+
+    let task = service
+        .store()
+        .load_task_cursor(&task_key())
+        .await
+        .expect("cursor")
+        .expect("task");
+    assert_eq!(task.attempt_count, 1);
+    assert_eq!(task.response_ids, ["resp-ok"]);
+}
+
+#[tokio::test]
 async fn ignores_models_exchange_before_responses_on_same_connection() {
     let dir = TempDir::new().expect("tmp");
     let cfg = config(&dir);

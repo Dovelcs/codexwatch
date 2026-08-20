@@ -532,6 +532,17 @@ impl ClientStore {
         .transpose()
     }
 
+    pub async fn has_attempt_response(&self, task: &TaskKey, response_id: &str) -> Result<bool> {
+        let exists: i64 = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM attempts WHERE task_ref = ? AND response_id = ?)",
+        )
+        .bind(task.task_ref())
+        .bind(response_id)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(exists != 0)
+    }
+
     pub async fn note_flow_open(
         &self,
         flow_id: Uuid,
@@ -692,7 +703,8 @@ impl ClientStore {
         match record {
             SummaryRecord::Task(summary) => self.upsert_task_summary_tx(tx, summary).await,
             SummaryRecord::TaskTransition(transition) => {
-                self.upsert_transition_tx(tx, transition).await
+                self.upsert_transition_tx(tx, transition).await?;
+                Ok(true)
             }
             SummaryRecord::Attempt(attempt) => self.upsert_attempt_tx(tx, attempt).await,
             SummaryRecord::CaptureGap(gap) => self.upsert_gap_tx(tx, gap).await,
@@ -1421,6 +1433,7 @@ fn map_transition_event(transition: &TaskTransition) -> TaskEvent {
             TaskEventKind::TerminalLost
         }
         (TransitionCause::CaptureLost, _, _) => TaskEventKind::CaptureGap,
+        (TransitionCause::ProcessExited, _, Some(TaskOutcome::Lost)) => TaskEventKind::TerminalLost,
         (TransitionCause::ProcessExited, _, _) => TaskEventKind::ProcessExit,
         (TransitionCause::CodexTurnAborted, _, _) => TaskEventKind::TerminalAborted,
         (TransitionCause::CodexTurnComplete, _, Some(TaskOutcome::Completed)) => {

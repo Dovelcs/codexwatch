@@ -1658,7 +1658,7 @@ async fn persist_task_upload(
     .execute(&mut **tx)
     .await?;
 
-    replace_payloads(
+    upsert_payloads(
         tx,
         "attempts",
         "attempt_id",
@@ -1669,7 +1669,7 @@ async fn persist_task_upload(
         |attempt| attempt.started_at_ms,
     )
     .await?;
-    replace_payloads(
+    upsert_payloads(
         tx,
         "task_events",
         "event_id",
@@ -1680,7 +1680,7 @@ async fn persist_task_upload(
         |event| event.occurred_at_ms,
     )
     .await?;
-    replace_payloads(
+    upsert_payloads(
         tx,
         "errors",
         "error_id",
@@ -1691,7 +1691,7 @@ async fn persist_task_upload(
         |error| error.occurred_at_ms,
     )
     .await?;
-    replace_payloads(
+    upsert_payloads(
         tx,
         "capture_gaps",
         "gap_id",
@@ -1705,7 +1705,7 @@ async fn persist_task_upload(
     Ok(())
 }
 
-async fn replace_payloads<T, FId, FTs>(
+async fn upsert_payloads<T, FId, FTs>(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     table: &str,
     id_column: &str,
@@ -1720,14 +1720,10 @@ where
     FId: Fn(&T) -> String,
     FTs: Fn(&T) -> i64,
 {
-    let delete_sql = format!("DELETE FROM {table} WHERE task_ref=?1");
-    sqlx::query(&delete_sql)
-        .bind(task_ref)
-        .execute(&mut **tx)
-        .await?;
-
     let insert_sql = format!(
-        "INSERT INTO {table}(task_ref, {id_column}, {ts_column}, payload_json) VALUES(?1, ?2, ?3, ?4)"
+        "INSERT INTO {table}(task_ref, {id_column}, {ts_column}, payload_json) VALUES(?1, ?2, ?3, ?4) \
+         ON CONFLICT({id_column}) DO UPDATE SET task_ref=excluded.task_ref, \
+         {ts_column}=excluded.{ts_column}, payload_json=excluded.payload_json"
     );
     for item in items {
         sqlx::query(&insert_sql)
@@ -2337,8 +2333,8 @@ mod tests {
         http::{Method, Request, StatusCode, header},
     };
     use codexwatch_protocol::{
-        ClientInstance, CodexTaskMetadata, ContentPart, IngestBatch, TaskIdentity, TaskPhase,
-        TaskSnapshot, TaskUpload, UsageSummary, encode_batch,
+        AttemptStatus, ClientInstance, CodexTaskMetadata, ContentPart, IngestBatch, TaskEventKind,
+        TaskIdentity, TaskPhase, TaskSnapshot, TaskUpload, UsageSummary, encode_batch,
     };
     use tempfile::TempDir;
     use tower::ServiceExt;
@@ -2591,6 +2587,83 @@ mod tests {
             .expect("count")
             .get("count");
         assert_eq!(receipt_count, 1);
+    }
+
+    #[tokio::test]
+    async fn later_task_delta_preserves_attempts_and_events() {
+        let h = Harness::new().await;
+        h.issue_token("client-a", "tok-client-a", TokenRole::Client)
+            .await;
+        let task_ref = "s1:t1:u1";
+        let attempt_id = Uuid::now_v7();
+        let event_id = Uuid::now_v7();
+        let mut first = sample_batch("client-a", Uuid::now_v7(), "s1", "t1", "u1");
+        first.tasks[0].snapshot.attempt_count = 1;
+        first.tasks[0].attempts.push(AttemptRecord {
+            attempt_id,
+            task_ref: task_ref.to_owned(),
+            ordinal: 1,
+            response_id: Some("resp-1".to_owned()),
+            transport: "responses".to_owned(),
+            status: AttemptStatus::Completed,
+            http_status: Some(200),
+            model: Some("gpt-5-codex".to_owned()),
+            tool_names: Vec::new(),
+            usage: UsageSummary::default(),
+            error: None,
+            request_object_sha256: None,
+            response_object_sha256: None,
+            started_at_ms: 5,
+            ended_at_ms: Some(10),
+            awaiting_tool: false,
+        });
+        first.tasks[0].events.push(TaskEvent {
+            event_id,
+            task_ref: task_ref.to_owned(),
+            sequence: 1,
+            occurred_at_ms: 10,
+            kind: TaskEventKind::AttemptCompleted,
+            phase: TaskPhase::Running,
+            terminal: None,
+            attempt_id: Some(attempt_id),
+            response_id: Some("resp-1".to_owned()),
+            model: Some("gpt-5-codex".to_owned()),
+            tool_names: Vec::new(),
+            usage: UsageSummary::default(),
+            error: None,
+            http_status: Some(200),
+            exit_code: None,
+            signal: None,
+            note: None,
+        });
+        assert_eq!(
+            ingest_batch(&h, "tok-client-a", &first).await.status(),
+            StatusCode::OK
+        );
+
+        let mut terminal = sample_batch("client-a", Uuid::now_v7(), "s1", "t1", "u1");
+        terminal.tasks[0].snapshot.sequence = 2;
+        terminal.tasks[0].snapshot.attempt_count = 1;
+        terminal.tasks[0].snapshot.updated_at_ms = 20;
+        assert_eq!(
+            ingest_batch(&h, "tok-client-a", &terminal).await.status(),
+            StatusCode::OK
+        );
+
+        let attempt_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM attempts WHERE task_ref=?1")
+                .bind(task_ref)
+                .fetch_one(&h.pool)
+                .await
+                .expect("attempt count");
+        let event_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM task_events WHERE task_ref=?1")
+                .bind(task_ref)
+                .fetch_one(&h.pool)
+                .await
+                .expect("event count");
+        assert_eq!(attempt_count, 1);
+        assert_eq!(event_count, 1);
     }
 
     #[tokio::test]

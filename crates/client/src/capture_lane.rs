@@ -1104,6 +1104,15 @@ impl LiveCaptureLane {
             thread_id: exchange.attempt.identity.thread_id.clone(),
             turn_id: exchange.attempt.identity.turn_id.clone(),
         };
+        let attempt_projection = map_attempt_projection(&exchange.attempt);
+        if let Some(response_id) = attempt_projection.response_id.as_deref()
+            && self.store.has_attempt_response(&task, response_id).await?
+        {
+            return Ok(CaptureBatch {
+                records: Vec::new(),
+                contents: Vec::new(),
+            });
+        }
         let current = self.store.load_task_cursor(&task).await?;
         let sequence = current.as_ref().map_or(1, |cursor| cursor.sequence + 1);
         let ordinal = current
@@ -1115,7 +1124,6 @@ impl LiveCaptureLane {
                 cursor.started_at
             });
 
-        let attempt_projection = map_attempt_projection(&exchange.attempt);
         let merged_tools = merge_unique(
             current
                 .as_ref()

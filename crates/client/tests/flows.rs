@@ -556,3 +556,44 @@ async fn survives_reopen_with_pending_terminal_batch() {
     reopened.flush_outbox_once().await.expect("flush");
     assert_eq!(state.lock().await.batches.len(), 1);
 }
+
+#[tokio::test]
+async fn same_sequence_transition_is_included_in_outbox_batch() {
+    let state = Arc::new(Mutex::new(ServerState::default()));
+    let server_url = spawn_server(state.clone()).await;
+    let dir = TempDir::new().expect("tmp");
+    let cfg = config(&dir, server_url);
+    let service = ClientService::open(cfg).await.expect("service");
+    let task = task_key();
+    let event_id = Uuid::now_v7();
+    let mut summary = task_summary(task.clone(), 1);
+    summary.last_event_id = event_id;
+
+    service
+        .ingest(ClientIngress {
+            records: vec![
+                SummaryRecord::Task(summary),
+                SummaryRecord::TaskTransition(TaskTransition {
+                    event_id,
+                    task,
+                    sequence: 1,
+                    observed_at: OffsetDateTime::now_utc(),
+                    phase: TaskPhase::Running,
+                    outcome: None,
+                    cause: TransitionCause::AttemptCompleted,
+                    completeness: Completeness::Complete,
+                    error: None,
+                }),
+            ],
+            contents: vec![],
+        })
+        .await
+        .expect("ingest");
+    service.flush_outbox_once().await.expect("flush");
+
+    let state = state.lock().await;
+    assert_eq!(state.batches.len(), 1);
+    assert_eq!(state.batches[0].tasks.len(), 1);
+    assert_eq!(state.batches[0].tasks[0].events.len(), 1);
+    assert_eq!(state.batches[0].tasks[0].events[0].event_id, event_id);
+}
