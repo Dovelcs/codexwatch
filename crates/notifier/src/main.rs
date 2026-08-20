@@ -26,6 +26,7 @@ struct Config {
     admin_api_token: Option<String>,
     client_id: String,
     poll_interval_seconds: Option<u64>,
+    notify_completed: Option<bool>,
     state_path: PathBuf,
     openclaw_binary: Option<PathBuf>,
     feishu_account: Option<String>,
@@ -41,6 +42,10 @@ impl Config {
 
     fn poll_interval(&self) -> Duration {
         Duration::from_secs(self.poll_interval_seconds.unwrap_or(5).max(1))
+    }
+
+    fn notify_completed(&self) -> bool {
+        self.notify_completed.unwrap_or(false)
     }
 
     fn openclaw_binary(&self) -> &Path {
@@ -326,6 +331,9 @@ async fn process_tasks(
         let Some(kind) = notice_kind(task) else {
             continue;
         };
+        if kind == NoticeKind::Abnormal && task.conversation_title.is_none() {
+            continue;
+        }
         let seen = match kind {
             NoticeKind::Completed => state.completed_tasks.contains(&task.task_ref),
             NoticeKind::Abnormal => state.abnormal_tasks.contains(&task.task_ref),
@@ -333,14 +341,14 @@ async fn process_tasks(
         if seen {
             continue;
         }
+        if deliver && (kind != NoticeKind::Completed || config.notify_completed()) {
+            send_feishu(config, &notice_message(task, kind)).await?;
+        }
         match kind {
             NoticeKind::Completed => state.completed_tasks.insert(task.task_ref.clone()),
             NoticeKind::Abnormal => state.abnormal_tasks.insert(task.task_ref.clone()),
         };
         state.save(&config.state_path)?;
-        if deliver {
-            send_feishu(config, &notice_message(task, kind)).await?;
-        }
     }
     Ok(())
 }
@@ -483,5 +491,22 @@ mod tests {
                 .completed_tasks,
             state.completed_tasks
         );
+    }
+
+    #[test]
+    fn completion_notifications_default_off() {
+        let config = Config {
+            server_url: "http://127.0.0.1:18080".to_owned(),
+            api_token: "reader".to_owned(),
+            admin_api_token: None,
+            client_id: "local".to_owned(),
+            poll_interval_seconds: None,
+            notify_completed: None,
+            state_path: PathBuf::from("/tmp/state.json"),
+            openclaw_binary: None,
+            feishu_account: None,
+            feishu_target: "ou_test".to_owned(),
+        };
+        assert!(!config.notify_completed());
     }
 }

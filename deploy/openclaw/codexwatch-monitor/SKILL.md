@@ -29,4 +29,4 @@ description: 查询 CodexWatch 中真实 Codex 对话的任务状态、原始标
 - `integrity=degraded|lost|unsupported_build` 表示捕获证据不完整，不能伪装成模型失败。
 - 返回结果时优先给出 `conversation_title`、`session_id`、`turn_id`、终态、时间和直接错误原因。
 
-完成/异常飞书提醒由独立 systemd 服务发送，不需要也不要启动 agent、cron 或模型任务。
+异常飞书提醒由独立 systemd 服务发送，默认不发送完成提醒，不需要也不要启动 agent、cron 或模型任务。通知必须包含 `conversation_title` 和原始错误原因。
