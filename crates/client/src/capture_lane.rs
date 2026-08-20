@@ -1161,12 +1161,13 @@ impl LiveCaptureLane {
                         .and_then(|cursor| cursor.conversation_title.clone())
                 }),
             phase: attempt_projection.task_phase,
-            outcome: None,
+            outcome: attempt_projection.task_outcome,
             sequence,
             last_event_id: Uuid::now_v7(),
             started_at,
             updated_at: OffsetDateTime::now_utc(),
-            terminal_at: None,
+            terminal_at: (attempt_projection.task_phase == TaskPhase::Terminal)
+                .then_some(OffsetDateTime::now_utc()),
             attempt_count: ordinal,
             model: exchange
                 .attempt
@@ -1188,7 +1189,7 @@ impl LiveCaptureLane {
             sequence,
             observed_at: task_summary.updated_at,
             phase: task_summary.phase,
-            outcome: None,
+            outcome: task_summary.outcome,
             cause: attempt_projection.cause,
             completeness: task_summary.completeness,
             error: task_summary.last_error.clone(),
@@ -1291,7 +1292,9 @@ impl LiveCaptureLane {
 
         if let Some(task) = task {
             let cursor = self.store.load_task_cursor(&task).await?;
-            if let Some(cursor) = cursor {
+            if let Some(cursor) = cursor
+                && cursor.phase != TaskPhase::Terminal
+            {
                 let error = StructuredError::CaptureLost(CaptureLoss { reason, lost_bytes });
                 let summary = TaskSummary {
                     task: task.clone(),
@@ -1412,6 +1415,7 @@ impl LiveCaptureLane {
 struct AttemptProjection {
     attempt_status: AttemptStatus,
     task_phase: TaskPhase,
+    task_outcome: Option<TaskOutcome>,
     completeness: Completeness,
     error: Option<StructuredError>,
     response_id: Option<String>,
@@ -1428,6 +1432,7 @@ fn map_attempt_projection(attempt: &DecodedAttempt) -> AttemptProjection {
     let mut end_turn = true;
     let mut status = AttemptStatus::Running;
     let mut phase = TaskPhase::Running;
+    let mut outcome = None;
     let mut cause = TransitionCause::AttemptStarted;
     let mut saw_terminal = false;
     for event in &attempt.decoded_events {
@@ -1530,11 +1535,16 @@ fn map_attempt_projection(attempt: &DecodedAttempt) -> AttemptProjection {
     } else if status == AttemptStatus::Completed && (!tool_names.is_empty() || !end_turn) {
         phase = TaskPhase::AwaitingTool;
         cause = TransitionCause::ToolCallObserved;
+    } else if status == AttemptStatus::Completed && end_turn {
+        phase = TaskPhase::Terminal;
+        outcome = Some(TaskOutcome::Completed);
+        cause = TransitionCause::ResponseEndTurn;
     }
 
     AttemptProjection {
         attempt_status: status,
         task_phase: phase,
+        task_outcome: outcome,
         completeness,
         error,
         response_id,

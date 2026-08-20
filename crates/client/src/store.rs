@@ -1487,6 +1487,10 @@ fn map_attempt_status(status: AttemptStatus) -> wire::AttemptStatus {
 fn map_transition_event(transition: &TaskTransition) -> TaskEvent {
     let kind = match (transition.cause, transition.phase, transition.outcome) {
         (TransitionCause::AttemptStarted, _, _) => TaskEventKind::AttemptStarted,
+        (TransitionCause::ResponseEndTurn, TaskPhase::Terminal, Some(TaskOutcome::Completed)) => {
+            TaskEventKind::TerminalCompleted
+        }
+        (TransitionCause::ResponseEndTurn, _, _) => TaskEventKind::AttemptCompleted,
         (TransitionCause::ToolCallObserved, _, _) => TaskEventKind::AwaitingTool,
         (TransitionCause::RetryScheduled, _, _) => TaskEventKind::Retrying,
         (TransitionCause::CaptureLost, TaskPhase::Terminal, Some(TaskOutcome::Lost)) => {

@@ -83,10 +83,9 @@ fn failed_response_bytes() -> Vec<u8> {
     .into_bytes()
 }
 
-fn completed_response_bytes() -> Vec<u8> {
-    let body = concat!(
-        "event: response.completed\n",
-        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-ok\",\"end_turn\":true,\"usage\":{\"input_tokens\":11,\"output_tokens\":7,\"total_tokens\":18}}}\n\n"
+fn completed_response_bytes_with_end_turn(end_turn: bool) -> Vec<u8> {
+    let body = format!(
+        "event: response.completed\ndata: {{\"type\":\"response.completed\",\"response\":{{\"id\":\"resp-ok\",\"end_turn\":{end_turn},\"usage\":{{\"input_tokens\":11,\"output_tokens\":7,\"total_tokens\":18}}}}}}\n\n"
     );
     format!(
         "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
@@ -94,6 +93,10 @@ fn completed_response_bytes() -> Vec<u8> {
         body
     )
     .into_bytes()
+}
+
+fn completed_response_bytes() -> Vec<u8> {
+    completed_response_bytes_with_end_turn(true)
 }
 
 fn models_request_bytes() -> Vec<u8> {
@@ -265,9 +268,12 @@ async fn syn_then_payload_and_retrying_attempts_do_not_terminal_task() {
         .await
         .expect("cursor")
         .expect("task");
-    assert_eq!(after_second.phase, TaskPhase::Running);
+    assert_eq!(after_second.phase, TaskPhase::Terminal);
     assert_eq!(after_second.attempt_count, 2);
-    assert!(after_second.outcome.is_none());
+    assert_eq!(
+        after_second.outcome,
+        Some(codexwatch_client::TaskOutcome::Completed)
+    );
     assert!(after_second.response_ids.iter().any(|id| id == "resp-ok"));
 }
 
@@ -294,7 +300,7 @@ async fn non_turn_request_kind_is_ignored() {
         12000,
         false,
         true,
-        completed_response_bytes(),
+        completed_response_bytes_with_end_turn(false),
     ))
     .await
     .expect("response");
@@ -330,7 +336,7 @@ async fn capture_gap_only_degrades_existing_task() {
         13000,
         false,
         false,
-        completed_response_bytes(),
+        completed_response_bytes_with_end_turn(false),
     ))
     .await
     .expect("response");
@@ -351,7 +357,7 @@ async fn capture_gap_only_degrades_existing_task() {
         .await
         .expect("cursor")
         .expect("task");
-    assert_eq!(task.phase, TaskPhase::Running);
+    assert_eq!(task.phase, TaskPhase::AwaitingTool);
     assert!(task.outcome.is_none());
     assert_eq!(task.completeness, codexwatch_client::Completeness::Degraded);
 }
@@ -510,7 +516,11 @@ async fn daemon_keeps_running_when_command_endpoint_is_offline() {
         .await
         .expect("cursor")
         .expect("task");
-    assert_eq!(task.phase, TaskPhase::Running);
+    assert_eq!(task.phase, TaskPhase::Terminal);
+    assert_eq!(
+        task.outcome,
+        Some(codexwatch_client::TaskOutcome::Completed)
+    );
     assert!(
         service
             .store()
@@ -599,7 +609,14 @@ async fn process_exit_marks_associated_active_task_lost() {
     .await
     .expect("request");
     lane.ingest_input(CaptureInput::AttributedTcpSegment {
-        segment: match segment(8080, 50006, 17000, false, true, completed_response_bytes()) {
+        segment: match segment(
+            8080,
+            50006,
+            17000,
+            false,
+            true,
+            completed_response_bytes_with_end_turn(false),
+        ) {
             CaptureInput::TcpSegment(segment) => segment,
             _ => unreachable!(),
         },

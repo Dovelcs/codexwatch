@@ -1,0 +1,23 @@
+[Unit]
+Description=CodexWatch agent-free Feishu notifier
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+Environment=HOME=/root
+ExecStart=/usr/local/bin/codexwatch-notifier
+Restart=on-failure
+RestartSec=5s
+StateDirectory=codexwatch-notifier
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/codexwatch-notifier /root/.openclaw
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

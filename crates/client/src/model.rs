@@ -82,6 +82,7 @@ pub enum TransitionCause {
     CaptureStarted,
     AttemptStarted,
     AttemptCompleted,
+    ResponseEndTurn,
     ToolCallObserved,
     RetryScheduled,
     CodexTurnComplete,
