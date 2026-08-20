@@ -38,6 +38,7 @@ fn config(dir: &TempDir) -> ClientConfig {
         capture_remote_ports: vec![8080],
         ebpf_object_path: None,
         codex_binary_path: None,
+        codex_home: None,
         client_version: "0.1.0-test".into(),
     }
 }
@@ -647,7 +648,15 @@ async fn process_exit_marks_associated_active_task_lost() {
 #[tokio::test]
 async fn attributed_server_packet_before_request_keeps_flow_direction() {
     let dir = TempDir::new().expect("tmp");
-    let cfg = config(&dir);
+    let codex_home = dir.path().join(".codex");
+    fs::create_dir_all(&codex_home).expect("codex home");
+    fs::write(
+        codex_home.join("session_index.jsonl"),
+        b"{\"id\":\"session-live\",\"thread_name\":\"original Codex title\"}\n",
+    )
+    .expect("session index");
+    let mut cfg = config(&dir);
+    cfg.codex_home = Some(codex_home);
     let service = ClientService::open(cfg.clone()).await.expect("service");
     let mut lane = LiveCaptureLane::new(cfg, service.store().clone());
     let process_instance_id = Uuid::now_v7();
@@ -691,6 +700,10 @@ async fn attributed_server_packet_before_request_keeps_flow_direction() {
         .expect("task");
     assert_eq!(task.attempt_count, 1);
     assert!(task.response_ids.iter().any(|id| id == "resp-ok"));
+    assert_eq!(
+        task.conversation_title.as_deref(),
+        Some("original Codex title")
+    );
 }
 
 #[tokio::test]

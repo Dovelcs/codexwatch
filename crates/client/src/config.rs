@@ -29,6 +29,7 @@ pub struct ClientConfig {
     pub capture_remote_ports: Vec<u16>,
     pub ebpf_object_path: Option<PathBuf>,
     pub codex_binary_path: Option<PathBuf>,
+    pub codex_home: Option<PathBuf>,
     pub client_version: String,
 }
 
@@ -56,6 +57,7 @@ struct ClientFileConfig {
     capture_remote_ports: Vec<u16>,
     ebpf_object_path: Option<PathBuf>,
     codex_binary_path: Option<PathBuf>,
+    codex_home: Option<PathBuf>,
     client_version: Option<String>,
 }
 
@@ -109,6 +111,7 @@ impl ClientConfig {
             capture_remote_ports: file.capture_remote_ports,
             ebpf_object_path: file.ebpf_object_path,
             codex_binary_path: file.codex_binary_path,
+            codex_home: file.codex_home,
             client_version: file
                 .client_version
                 .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_owned()),
@@ -149,6 +152,13 @@ impl ClientConfig {
     #[must_use]
     pub fn ebpf_enabled(&self) -> bool {
         self.ebpf_object_path.is_some() && self.codex_binary_path.is_some()
+    }
+
+    #[must_use]
+    pub fn codex_session_index_path(&self) -> Option<PathBuf> {
+        self.codex_home
+            .as_ref()
+            .map(|home| home.join("session_index.jsonl"))
     }
 }
 

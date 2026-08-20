@@ -16,6 +16,7 @@ use uuid::Uuid;
 use crate::{
     blob::StoredContentInput,
     config::ClientConfig,
+    conversation_titles::ConversationTitleIndex,
     decode_support::{
         AssemblerResult, DecodedAttempt, DecodedError, DecodedEvent, H2Decoder, H2Event,
         HttpParseError, PassiveTap, ProcessFlowDirection, ProcessFlowIndex, TapError, TcpAssembler,
@@ -558,6 +559,7 @@ struct DecodedExchange {
 pub struct LiveCaptureLane {
     config: ClientConfig,
     store: ClientStore,
+    conversation_titles: Arc<ConversationTitleIndex>,
     flows: HashMap<FlowKey, FlowState>,
     process_tasks: HashMap<Uuid, HashSet<TaskKey>>,
 }
@@ -565,9 +567,21 @@ pub struct LiveCaptureLane {
 impl LiveCaptureLane {
     #[must_use]
     pub fn new(config: ClientConfig, store: ClientStore) -> Self {
+        let titles =
+            ConversationTitleIndex::open(config.codex_session_index_path()).unwrap_or_default();
+        Self::with_conversation_titles(config, store, Arc::new(titles))
+    }
+
+    #[must_use]
+    pub fn with_conversation_titles(
+        config: ClientConfig,
+        store: ClientStore,
+        conversation_titles: Arc<ConversationTitleIndex>,
+    ) -> Self {
         Self {
             config,
             store,
+            conversation_titles,
             flows: HashMap::new(),
             process_tasks: HashMap::new(),
         }
@@ -1138,6 +1152,14 @@ impl LiveCaptureLane {
         );
         let task_summary = TaskSummary {
             task: task.clone(),
+            conversation_title: self
+                .conversation_titles
+                .title(&task.session_id)
+                .or_else(|| {
+                    current
+                        .as_ref()
+                        .and_then(|cursor| cursor.conversation_title.clone())
+                }),
             phase: attempt_projection.task_phase,
             outcome: None,
             sequence,
@@ -1273,6 +1295,10 @@ impl LiveCaptureLane {
                 let error = StructuredError::CaptureLost(CaptureLoss { reason, lost_bytes });
                 let summary = TaskSummary {
                     task: task.clone(),
+                    conversation_title: self
+                        .conversation_titles
+                        .title(&task.session_id)
+                        .or(cursor.conversation_title),
                     phase: cursor.phase,
                     outcome: cursor.outcome,
                     sequence: cursor.sequence + 1,
@@ -1343,6 +1369,10 @@ impl LiveCaptureLane {
                 };
             let summary = TaskSummary {
                 task: task.clone(),
+                conversation_title: self
+                    .conversation_titles
+                    .title(&task.session_id)
+                    .or(cursor.conversation_title),
                 phase: TaskPhase::Terminal,
                 outcome: Some(outcome),
                 sequence: cursor.sequence + 1,

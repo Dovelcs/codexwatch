@@ -97,6 +97,7 @@ fn config(dir: &TempDir, server_url: String) -> ClientConfig {
         capture_remote_ports: Vec::new(),
         ebpf_object_path: None,
         codex_binary_path: None,
+        codex_home: None,
         client_version: "0.1.0-test".into(),
     }
 }

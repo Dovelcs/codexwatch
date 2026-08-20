@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, path::PathBuf};
+use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -19,6 +19,7 @@ use crate::{
         ProcessDiscovery, ProcfsProcessDiscovery, SharedProcessIndex,
     },
     config::ClientConfig,
+    conversation_titles::ConversationTitleIndex,
     ebpf_lane::{EbpfFactory, SharedCaptureHealth, ebpf_factory_from_config, run_ebpf_loop},
     model::{HeartbeatSummary, SummaryRecord},
     store::{ClientStore, PersistOutcome, UploadPreparation},
@@ -273,8 +274,38 @@ impl ClientService {
 
         let lane_store = self.store.clone();
         let lane_config = self.config.clone();
+        let conversation_titles = Arc::new(ConversationTitleIndex::open(
+            self.config.codex_session_index_path(),
+        )?);
+        for (session_id, title) in conversation_titles.titles() {
+            self.store
+                .sync_conversation_title(&session_id, &title)
+                .await?;
+        }
+        if self.config.codex_session_index_path().is_some() {
+            let watcher_titles = conversation_titles.clone();
+            let (title_tx, mut title_rx) = mpsc::unbounded_channel();
+            tasks.spawn_blocking(move || watcher_titles.watch(&title_tx));
+            let title_store = self.store.clone();
+            tasks.spawn(async move {
+                while let Some((session_id, title)) = title_rx.recv().await {
+                    title_store
+                        .sync_conversation_title(&session_id, &title)
+                        .await?;
+                }
+                Ok::<(), anyhow::Error>(())
+            });
+        }
         tasks.spawn(async move {
-            run_capture_ingest_loop(LiveCaptureLane::new(lane_config, lane_store), rx).await
+            run_capture_ingest_loop(
+                LiveCaptureLane::with_conversation_titles(
+                    lane_config,
+                    lane_store,
+                    conversation_titles,
+                ),
+                rx,
+            )
+            .await
         });
 
         if let Some(capture) = capture {

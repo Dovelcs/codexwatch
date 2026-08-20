@@ -29,6 +29,7 @@
 pub mod blob;
 pub mod capture_lane;
 pub mod config;
+pub mod conversation_titles;
 pub mod decode_support;
 pub mod ebpf_lane;
 pub mod model;

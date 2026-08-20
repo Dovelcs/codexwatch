@@ -224,6 +224,7 @@ mod tests {
                 parent_turn_id: None,
                 root_turn_id: None,
             },
+            conversation_title: None,
             sequence: 0,
             phase: TaskPhase::Running,
             terminal: None,

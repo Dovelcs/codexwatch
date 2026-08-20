@@ -193,6 +193,8 @@ pub struct TaskTransition {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskSummary {
     pub task: TaskKey,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation_title: Option<String>,
     pub phase: TaskPhase,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outcome: Option<TaskOutcome>,

@@ -185,6 +185,7 @@ fn config(dir: &TempDir, server_url: String) -> ClientConfig {
         capture_remote_ports: Vec::new(),
         ebpf_object_path: None,
         codex_binary_path: None,
+        codex_home: None,
         client_version: "0.1.0-test".into(),
     }
 }
@@ -202,6 +203,7 @@ fn task_key() -> TaskKey {
 fn task_summary(task: TaskKey, sequence: u64) -> TaskSummary {
     TaskSummary {
         task,
+        conversation_title: None,
         phase: TaskPhase::Running,
         outcome: None,
         sequence,
@@ -217,6 +219,39 @@ fn task_summary(task: TaskKey, sequence: u64) -> TaskSummary {
         completeness: Completeness::Complete,
         last_error: None,
     }
+}
+
+#[tokio::test]
+async fn title_sync_updates_existing_task_and_enqueues_snapshot() {
+    let dir = TempDir::new().expect("tmp");
+    let service = ClientService::open(config(&dir, "http://127.0.0.1:1".into()))
+        .await
+        .expect("service");
+    let task = task_key();
+    service
+        .ingest(ClientIngress {
+            records: vec![SummaryRecord::Task(task_summary(task.clone(), 1))],
+            contents: Vec::new(),
+        })
+        .await
+        .expect("seed task");
+
+    let batches = service
+        .store()
+        .sync_conversation_title(&task.session_id, "original Codex title")
+        .await
+        .expect("sync title");
+    assert_eq!(batches, 1);
+    let cursor = service
+        .store()
+        .load_task_cursor(&task)
+        .await
+        .expect("cursor")
+        .expect("task");
+    assert_eq!(
+        cursor.conversation_title.as_deref(),
+        Some("original Codex title")
+    );
 }
 
 #[tokio::test]

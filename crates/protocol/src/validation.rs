@@ -153,6 +153,9 @@ impl Validate for TaskSnapshot {
                 "only request_kind=turn may create a task",
             ));
         }
+        if let Some(title) = &self.conversation_title {
+            validate_text("conversation_title", title, 512)?;
+        }
         if self.updated_at_ms < self.started_at_ms {
             return Err(ValidationError::new(
                 "updated_at_ms",

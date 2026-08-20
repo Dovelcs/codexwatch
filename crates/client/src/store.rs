@@ -68,6 +68,7 @@ pub struct HealthSnapshot {
 #[derive(Debug, Clone)]
 pub struct TaskCursor {
     pub sequence: u64,
+    pub conversation_title: Option<String>,
     pub attempt_count: u32,
     pub phase: TaskPhase,
     pub outcome: Option<TaskOutcome>,
@@ -504,7 +505,7 @@ impl ClientStore {
 
     pub async fn load_task_cursor(&self, task: &TaskKey) -> Result<Option<TaskCursor>> {
         let row = sqlx::query(
-            "SELECT sequence, attempt_count, phase, outcome, started_at, updated_at, completeness, model, tool_names_json, response_ids_json, usage_json FROM active_tasks WHERE task_ref = ?",
+            "SELECT sequence, conversation_title, attempt_count, phase, outcome, started_at, updated_at, completeness, model, tool_names_json, response_ids_json, usage_json FROM active_tasks WHERE task_ref = ?",
         )
         .bind(task.task_ref())
         .fetch_optional(&self.pool)
@@ -512,6 +513,7 @@ impl ClientStore {
         row.map(|row| {
             Ok(TaskCursor {
                 sequence: row.try_get::<i64, _>("sequence")? as u64,
+                conversation_title: row.try_get("conversation_title")?,
                 attempt_count: row.try_get::<i64, _>("attempt_count")? as u32,
                 phase: serde_json::from_str(&row.try_get::<String, _>("phase")?)?,
                 outcome: row
@@ -530,6 +532,51 @@ impl ClientStore {
             })
         })
         .transpose()
+    }
+
+    pub async fn sync_conversation_title(&self, session_id: &str, title: &str) -> Result<usize> {
+        let rows = sqlx::query(
+            "SELECT client_id, provider, session_id, thread_id, turn_id, started_at
+             FROM active_tasks
+             WHERE session_id = ? AND (conversation_title IS NULL OR conversation_title != ?)",
+        )
+        .bind(session_id)
+        .bind(title)
+        .fetch_all(&self.pool)
+        .await?;
+        if rows.is_empty() {
+            return Ok(0);
+        }
+        sqlx::query(
+            "UPDATE active_tasks SET conversation_title = ?
+             WHERE session_id = ? AND (conversation_title IS NULL OR conversation_title != ?)",
+        )
+        .bind(title)
+        .bind(session_id)
+        .bind(title)
+        .execute(&self.pool)
+        .await?;
+        let records = rows
+            .into_iter()
+            .map(|row| {
+                SummaryRecord::Session(SessionSummary {
+                    task: TaskKey {
+                        client_id: row.get("client_id"),
+                        provider: crate::model::ProviderId::new(row.get::<String, _>("provider")),
+                        session_id: row.get("session_id"),
+                        thread_id: row.get("thread_id"),
+                        turn_id: row.get("turn_id"),
+                    },
+                    parent_turn_id: None,
+                    root_turn_id: None,
+                    first_seen_at: from_ms(row.get("started_at")),
+                })
+            })
+            .collect();
+        Ok(self
+            .persist_ingress(records, Vec::new())
+            .await?
+            .enqueued_batches)
     }
 
     pub async fn has_attempt_response(&self, task: &TaskKey, response_id: &str) -> Result<bool> {
@@ -606,6 +653,7 @@ impl ClientStore {
                 session_id TEXT NOT NULL,
                 thread_id TEXT NOT NULL,
                 turn_id TEXT NOT NULL,
+                conversation_title TEXT,
                 phase TEXT NOT NULL,
                 outcome TEXT,
                 sequence INTEGER NOT NULL,
@@ -691,6 +739,16 @@ impl ClientStore {
         ];
         for statement in statements {
             sqlx::query(statement).execute(&self.pool).await?;
+        }
+        let has_title_column = sqlx::query("PRAGMA table_info(active_tasks)")
+            .fetch_all(&self.pool)
+            .await?
+            .iter()
+            .any(|row| row.get::<String, _>("name") == "conversation_title");
+        if !has_title_column {
+            sqlx::query("ALTER TABLE active_tasks ADD COLUMN conversation_title TEXT")
+                .execute(&self.pool)
+                .await?;
         }
         Ok(())
     }
@@ -868,7 +926,7 @@ impl ClientStore {
         task_ref: &str,
     ) -> Result<Option<TaskSnapshot>> {
         let row = sqlx::query(
-            "SELECT client_id, provider, session_id, thread_id, turn_id, phase, outcome, sequence, started_at, updated_at, terminal_at, attempt_count, model, tool_names_json, response_ids_json, usage_json, completeness, last_error_json, parent_turn_id, root_turn_id FROM active_tasks WHERE task_ref = ?",
+            "SELECT client_id, provider, session_id, thread_id, turn_id, conversation_title, phase, outcome, sequence, started_at, updated_at, terminal_at, attempt_count, model, tool_names_json, response_ids_json, usage_json, completeness, last_error_json, parent_turn_id, root_turn_id FROM active_tasks WHERE task_ref = ?",
         )
         .bind(task_ref)
         .fetch_optional(&mut **tx)
@@ -899,6 +957,7 @@ impl ClientStore {
                     parent_turn_id: row.try_get("parent_turn_id")?,
                     root_turn_id: row.try_get("root_turn_id")?,
                 },
+                conversation_title: row.try_get("conversation_title")?,
                 sequence: row.try_get::<i64, _>("sequence")? as u64,
                 phase: map_phase(serde_json::from_str::<TaskPhase>(
                     &row.try_get::<String, _>("phase")?,
@@ -1043,9 +1102,9 @@ impl ClientStore {
             }
         }
         sqlx::query(
-            "INSERT INTO active_tasks(task_ref, client_id, provider, session_id, thread_id, turn_id, phase, outcome, sequence, last_event_id, started_at, updated_at, terminal_at, attempt_count, model, tool_names_json, response_ids_json, usage_json, completeness, last_error_json, parent_turn_id, root_turn_id, first_seen_at)
-             VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)
-             ON CONFLICT(task_ref) DO UPDATE SET phase=excluded.phase, outcome=excluded.outcome, sequence=excluded.sequence, last_event_id=excluded.last_event_id, started_at=excluded.started_at, updated_at=excluded.updated_at, terminal_at=excluded.terminal_at, attempt_count=excluded.attempt_count, model=excluded.model, tool_names_json=excluded.tool_names_json, response_ids_json=excluded.response_ids_json, usage_json=excluded.usage_json, completeness=excluded.completeness, last_error_json=excluded.last_error_json",
+            "INSERT INTO active_tasks(task_ref, client_id, provider, session_id, thread_id, turn_id, conversation_title, phase, outcome, sequence, last_event_id, started_at, updated_at, terminal_at, attempt_count, model, tool_names_json, response_ids_json, usage_json, completeness, last_error_json, parent_turn_id, root_turn_id, first_seen_at)
+             VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)
+             ON CONFLICT(task_ref) DO UPDATE SET conversation_title=COALESCE(excluded.conversation_title, active_tasks.conversation_title), phase=excluded.phase, outcome=excluded.outcome, sequence=excluded.sequence, last_event_id=excluded.last_event_id, started_at=excluded.started_at, updated_at=excluded.updated_at, terminal_at=excluded.terminal_at, attempt_count=excluded.attempt_count, model=excluded.model, tool_names_json=excluded.tool_names_json, response_ids_json=excluded.response_ids_json, usage_json=excluded.usage_json, completeness=excluded.completeness, last_error_json=excluded.last_error_json",
         )
         .bind(&task_ref)
         .bind(&summary.task.client_id)
@@ -1053,6 +1112,7 @@ impl ClientStore {
         .bind(&summary.task.session_id)
         .bind(&summary.task.thread_id)
         .bind(&summary.task.turn_id)
+        .bind(&summary.conversation_title)
         .bind(serde_json::to_string(&summary.phase)?)
         .bind(json_opt(&summary.outcome)?)
         .bind(summary.sequence as i64)

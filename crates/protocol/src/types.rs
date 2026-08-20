@@ -165,6 +165,8 @@ pub struct TaskSnapshot {
     pub task_ref: String,
     pub identity: TaskIdentity,
     pub codex: CodexTaskMetadata,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation_title: Option<String>,
     pub sequence: u64,
     pub phase: TaskPhase,
     pub terminal: Option<TerminalOutcome>,
@@ -407,6 +409,8 @@ pub struct SessionDetail {
     pub provider: String,
     pub session_id: String,
     pub thread_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation_title: Option<String>,
     pub tasks: Vec<TaskSnapshot>,
 }
 

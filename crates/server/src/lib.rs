@@ -1358,12 +1358,16 @@ async fn session_detail_inner(
         .map(|row| serde_json::from_str::<TaskSnapshot>(&row.get::<String, _>("snapshot_json")))
         .collect::<Result<Vec<_>, _>>()
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let conversation_title = tasks
+        .iter()
+        .find_map(|task| task.conversation_title.clone());
 
     Ok(SessionDetail {
         client_id: client_id.to_owned(),
         provider,
         session_id: session_id.to_owned(),
         thread_id,
+        conversation_title,
         tasks,
     })
 }
@@ -2472,6 +2476,7 @@ mod tests {
                         parent_turn_id: None,
                         root_turn_id: None,
                     },
+                    conversation_title: Some("original Codex title".to_owned()),
                     sequence: 1,
                     phase: TaskPhase::Running,
                     terminal: None,
@@ -2684,6 +2689,10 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let tasks: TaskListResponse = Harness::json(response).await;
         assert_eq!(tasks.tasks.len(), 1);
+        assert_eq!(
+            tasks.tasks[0].conversation_title.as_deref(),
+            Some("original Codex title")
+        );
 
         let response = h
             .request(Method::GET, "/api/v1/tasks", "tok-client-a", Body::empty())
@@ -2714,6 +2723,10 @@ mod tests {
         let session: SessionDetail = Harness::json(response).await;
         assert_eq!(session.client_id, "client-a");
         assert_eq!(session.thread_id, "t1");
+        assert_eq!(
+            session.conversation_title.as_deref(),
+            Some("original Codex title")
+        );
         assert_eq!(session.tasks.len(), 1);
 
         let response = h
@@ -3122,6 +3135,7 @@ mod tests {
                     parent_turn_id: None,
                     root_turn_id: None,
                 },
+                conversation_title: None,
                 sequence: 1,
                 phase: TaskPhase::Running,
                 terminal: None,
