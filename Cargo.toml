@@ -17,6 +17,7 @@ clap = { version = "4.5", features = ["derive", "env"] }
 futures = "0.3"
 hex = "0.4"
 http = "1.3"
+nix = { version = "0.30", features = ["user"] }
 reqwest = { version = "0.12", default-features = false, features = ["http2", "json", "rustls-tls", "stream"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -25,6 +26,7 @@ sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio",
 thiserror = "2.0"
 time = { version = "0.3", features = ["formatting", "parsing", "serde"] }
 tokio = { version = "1.47", features = ["full"] }
+toml = "0.9"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 uuid = { version = "1.18", features = ["serde", "v7"] }

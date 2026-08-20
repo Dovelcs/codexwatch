@@ -6,8 +6,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 DynamicUser=true
-EnvironmentFile=-/etc/codexwatch/server.env
-ExecStart=/usr/local/bin/codexwatch-server serve
+ExecStart=/usr/local/bin/codexwatch-server
 Restart=on-failure
 RestartSec=3s
 StateDirectory=codexwatch-server

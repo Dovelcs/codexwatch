@@ -1,0 +1,6 @@
+client_id = "local"
+server_url = "http://127.0.0.1:18080"
+api_token = "replace-with-issued-token"
+data_dir = "/var/lib/codexwatch-client"
+capture_interface = "tailscale0"
+capture_remote_ports = [8080]

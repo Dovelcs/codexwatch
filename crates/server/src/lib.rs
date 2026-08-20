@@ -32,6 +32,8 @@ use codexwatch_protocol::{
     TaskListQuery, TaskListResponse, TaskSnapshot, TaskUpload, Validate, decode_batch_with_payload,
     sha256_hex,
 };
+use nix::unistd::{Uid, User};
+use serde::Deserialize;
 use sqlx::{
     Row, SqlitePool,
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions},
@@ -44,12 +46,91 @@ const CONTENT_CONVERSATION_LIMIT: i64 = 30;
 const HEARTBEAT_RETENTION_MS: i64 = 30 * 24 * 60 * 60 * 1000;
 const EPHEMERA_RETENTION_MS: i64 = 180 * 24 * 60 * 60 * 1000;
 const RECEIPT_RETENTION_MS: i64 = 400 * 24 * 60 * 60 * 1000;
+const SERVER_CONFIG_FILE: &str = "server.toml";
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ServerConfig {
+    listen: SocketAddr,
+    #[serde(alias = "db")]
+    database_path: PathBuf,
+}
+
+impl ServerConfig {
+    fn load() -> Result<Self> {
+        let path = default_server_config_path()?;
+        let source = std::fs::read_to_string(&path)
+            .with_context(|| format!("read server config {}", path.display()))?;
+        toml::from_str(&source).with_context(|| format!("parse server config {}", path.display()))
+    }
+}
+
+fn default_server_config_path() -> Result<PathBuf> {
+    let sudo_home = sudo_user_home()?;
+    Ok(resolve_server_config_path(
+        Uid::effective().is_root(),
+        sudo_home.as_deref(),
+        std::env::var_os("XDG_CONFIG_HOME")
+            .as_deref()
+            .map(Path::new),
+        std::env::var_os("HOME").as_deref().map(Path::new),
+    ))
+}
+
+fn sudo_user_home() -> Result<Option<PathBuf>> {
+    let Some(name) = std::env::var_os("SUDO_USER") else {
+        return Ok(None);
+    };
+    let name = name.to_string_lossy();
+    if name.is_empty() || name == "root" {
+        return Ok(None);
+    }
+    let user = User::from_name(&name)
+        .with_context(|| format!("lookup sudo user {name}"))?
+        .with_context(|| format!("sudo user {name} does not exist"))?;
+    Ok(Some(user.dir))
+}
+
+fn resolve_server_config_path(
+    effective_root: bool,
+    sudo_home: Option<&Path>,
+    xdg_config_home: Option<&Path>,
+    home: Option<&Path>,
+) -> PathBuf {
+    if let Some(home) = sudo_home {
+        return home
+            .join(".config")
+            .join("codexwatch")
+            .join(SERVER_CONFIG_FILE);
+    }
+    if effective_root {
+        return PathBuf::from("/etc/codexwatch/server.toml");
+    }
+    if let Some(config_home) = usable_config_root(xdg_config_home) {
+        return config_home.join("codexwatch").join(SERVER_CONFIG_FILE);
+    }
+    if let Some(home) = usable_config_root(home) {
+        return home
+            .join(".config")
+            .join("codexwatch")
+            .join(SERVER_CONFIG_FILE);
+    }
+    PathBuf::from("/etc/codexwatch/server.toml")
+}
+
+fn usable_config_root(path: Option<&Path>) -> Option<&Path> {
+    path.filter(|path| !path.as_os_str().is_empty() && *path != Path::new("/"))
+}
+
+fn configured_database_path(explicit: Option<PathBuf>) -> Result<PathBuf> {
+    explicit.map_or_else(|| Ok(ServerConfig::load()?.database_path), Ok)
+}
 
 #[derive(Debug, Parser)]
 #[command(name = "codexwatch-server")]
 pub struct Cli {
     #[command(subcommand)]
-    pub command: Command,
+    pub command: Option<Command>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -70,10 +151,10 @@ pub enum Command {
 
 #[derive(Debug, Args)]
 pub struct ServeArgs {
-    #[arg(long, default_value = "127.0.0.1:18080")]
-    pub listen: SocketAddr,
-    #[arg(long, default_value = "server.db")]
-    pub db: PathBuf,
+    #[arg(long)]
+    pub listen: Option<SocketAddr>,
+    #[arg(long)]
+    pub db: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -85,8 +166,8 @@ pub enum TokenRoleArg {
 
 #[derive(Debug, Args)]
 pub struct IssueTokenArgs {
-    #[arg(long, default_value = "server.db")]
-    pub db: PathBuf,
+    #[arg(long)]
+    pub db: Option<PathBuf>,
     #[arg(long)]
     pub client_id: String,
     #[arg(long)]
@@ -99,16 +180,16 @@ pub struct IssueTokenArgs {
 
 #[derive(Debug, Args)]
 pub struct RevokeTokenArgs {
-    #[arg(long, default_value = "server.db")]
-    pub db: PathBuf,
+    #[arg(long)]
+    pub db: Option<PathBuf>,
     #[arg(long)]
     pub token: String,
 }
 
 #[derive(Debug, Args)]
 pub struct ListArgs {
-    #[arg(long, default_value = "server.db")]
-    pub db: PathBuf,
+    #[arg(long)]
+    pub db: Option<PathBuf>,
     #[arg(long)]
     pub client_id: Option<String>,
     #[arg(long)]
@@ -121,24 +202,24 @@ pub struct ListArgs {
 
 #[derive(Debug, Args)]
 pub struct TaskArgs {
-    #[arg(long, default_value = "server.db")]
-    pub db: PathBuf,
+    #[arg(long)]
+    pub db: Option<PathBuf>,
     #[arg(long)]
     pub task_ref: String,
 }
 
 #[derive(Debug, Args)]
 pub struct CaptureHealthArgs {
-    #[arg(long, default_value = "server.db")]
-    pub db: PathBuf,
+    #[arg(long)]
+    pub db: Option<PathBuf>,
     #[arg(long)]
     pub client_id: String,
 }
 
 #[derive(Debug, Args)]
 pub struct SessionArgs {
-    #[arg(long, default_value = "server.db")]
-    pub db: PathBuf,
+    #[arg(long)]
+    pub db: Option<PathBuf>,
     #[arg(long)]
     pub client_id: String,
     #[arg(long)]
@@ -151,8 +232,8 @@ pub struct SessionArgs {
 
 #[derive(Debug, Args)]
 pub struct RequestContentArgs {
-    #[arg(long, default_value = "server.db")]
-    pub db: PathBuf,
+    #[arg(long)]
+    pub db: Option<PathBuf>,
     #[arg(long)]
     pub task_ref: String,
     #[arg(long, required = true)]
@@ -163,8 +244,8 @@ pub struct RequestContentArgs {
 
 #[derive(Debug, Args)]
 pub struct CleanupArgs {
-    #[arg(long, default_value = "server.db")]
-    pub db: PathBuf,
+    #[arg(long)]
+    pub db: Option<PathBuf>,
     #[arg(long)]
     pub now_ms: Option<i64>,
 }
@@ -264,30 +345,47 @@ struct StoredConversation {
 
 pub async fn run(cli: Cli) -> Result<()> {
     match cli.command {
-        Command::Serve(args) => serve(args).await,
-        Command::IssueToken(args) => issue_token(args).await,
-        Command::RevokeToken(args) => revoke_token(args).await,
-        Command::Tasks(args) => list_tasks_cli(args).await,
-        Command::Session(args) => session_cli(args).await,
-        Command::Task(args) => task_cli(args).await,
-        Command::Attempts(args) => attempts_cli(args).await,
-        Command::Events(args) => events_cli(args).await,
-        Command::Errors(args) => errors_cli(args).await,
-        Command::CaptureHealth(args) => capture_health_cli(args).await,
-        Command::RequestContent(args) => request_content_cli(args).await,
-        Command::Cleanup(args) => cleanup_cli(args).await,
+        None => {
+            serve(ServeArgs {
+                listen: None,
+                db: None,
+            })
+            .await
+        }
+        Some(Command::Serve(args)) => serve(args).await,
+        Some(Command::IssueToken(args)) => issue_token(args).await,
+        Some(Command::RevokeToken(args)) => revoke_token(args).await,
+        Some(Command::Tasks(args)) => list_tasks_cli(args).await,
+        Some(Command::Session(args)) => session_cli(args).await,
+        Some(Command::Task(args)) => task_cli(args).await,
+        Some(Command::Attempts(args)) => attempts_cli(args).await,
+        Some(Command::Events(args)) => events_cli(args).await,
+        Some(Command::Errors(args)) => errors_cli(args).await,
+        Some(Command::CaptureHealth(args)) => capture_health_cli(args).await,
+        Some(Command::RequestContent(args)) => request_content_cli(args).await,
+        Some(Command::Cleanup(args)) => cleanup_cli(args).await,
     }
 }
 
 async fn serve(args: ServeArgs) -> Result<()> {
-    let pool = open_pool(&args.db).await?;
+    let (listen, database_path) = match (args.listen, args.db) {
+        (Some(listen), Some(database_path)) => (listen, database_path),
+        (listen, database_path) => {
+            let config = ServerConfig::load()?;
+            (
+                listen.unwrap_or(config.listen),
+                database_path.unwrap_or(config.database_path),
+            )
+        }
+    };
+    let pool = open_pool(&database_path).await?;
     migrate(&pool).await?;
     cleanup_retention(&pool, now_ms()).await?;
     spawn_retention_task(pool.clone());
     let app = build_router(AppState { pool });
 
-    info!("listening on {}", args.listen);
-    let listener = tokio::net::TcpListener::bind(args.listen).await?;
+    info!("listening on {listen}");
+    let listener = tokio::net::TcpListener::bind(listen).await?;
     axum::serve(listener, app).await?;
     Ok(())
 }
@@ -335,7 +433,8 @@ async fn healthz(State(state): State<AppState>) -> Result<Json<SimpleOk>, Status
 }
 
 async fn issue_token(args: IssueTokenArgs) -> Result<()> {
-    let pool = open_pool(&args.db).await?;
+    let database_path = configured_database_path(args.db)?;
+    let pool = open_pool(&database_path).await?;
     migrate(&pool).await?;
     let role = if args.admin {
         TokenRole::Admin
@@ -356,7 +455,8 @@ async fn issue_token(args: IssueTokenArgs) -> Result<()> {
 }
 
 async fn revoke_token(args: RevokeTokenArgs) -> Result<()> {
-    let pool = open_pool(&args.db).await?;
+    let database_path = configured_database_path(args.db)?;
+    let pool = open_pool(&database_path).await?;
     migrate(&pool).await?;
     sqlx::query("UPDATE api_tokens SET revoked_at_ms=?2 WHERE token_hash=?1")
         .bind(hash_token(&args.token))
@@ -368,7 +468,8 @@ async fn revoke_token(args: RevokeTokenArgs) -> Result<()> {
 }
 
 async fn list_tasks_cli(args: ListArgs) -> Result<()> {
-    let pool = open_pool(&args.db).await?;
+    let database_path = configured_database_path(args.db)?;
+    let pool = open_pool(&database_path).await?;
     migrate(&pool).await?;
     let response = list_tasks_inner(
         &pool,
@@ -393,7 +494,8 @@ async fn list_tasks_cli(args: ListArgs) -> Result<()> {
 }
 
 async fn session_cli(args: SessionArgs) -> Result<()> {
-    let pool = open_pool(&args.db).await?;
+    let database_path = configured_database_path(args.db)?;
+    let pool = open_pool(&database_path).await?;
     migrate(&pool).await?;
     let detail = session_detail_inner(
         &pool,
@@ -415,7 +517,8 @@ async fn session_cli(args: SessionArgs) -> Result<()> {
 }
 
 async fn task_cli(args: TaskArgs) -> Result<()> {
-    let pool = open_pool(&args.db).await?;
+    let database_path = configured_database_path(args.db)?;
+    let pool = open_pool(&database_path).await?;
     migrate(&pool).await?;
     let detail = task_detail_inner(
         &pool,
@@ -432,7 +535,8 @@ async fn task_cli(args: TaskArgs) -> Result<()> {
 }
 
 async fn attempts_cli(args: TaskArgs) -> Result<()> {
-    let pool = open_pool(&args.db).await?;
+    let database_path = configured_database_path(args.db)?;
+    let pool = open_pool(&database_path).await?;
     migrate(&pool).await?;
     let attempts = task_attempts_inner(
         &pool,
@@ -449,7 +553,8 @@ async fn attempts_cli(args: TaskArgs) -> Result<()> {
 }
 
 async fn events_cli(args: TaskArgs) -> Result<()> {
-    let pool = open_pool(&args.db).await?;
+    let database_path = configured_database_path(args.db)?;
+    let pool = open_pool(&database_path).await?;
     migrate(&pool).await?;
     let events = task_events_inner(
         &pool,
@@ -466,7 +571,8 @@ async fn events_cli(args: TaskArgs) -> Result<()> {
 }
 
 async fn errors_cli(args: TaskArgs) -> Result<()> {
-    let pool = open_pool(&args.db).await?;
+    let database_path = configured_database_path(args.db)?;
+    let pool = open_pool(&database_path).await?;
     migrate(&pool).await?;
     let errors = task_errors_inner(
         &pool,
@@ -483,7 +589,8 @@ async fn errors_cli(args: TaskArgs) -> Result<()> {
 }
 
 async fn capture_health_cli(args: CaptureHealthArgs) -> Result<()> {
-    let pool = open_pool(&args.db).await?;
+    let database_path = configured_database_path(args.db)?;
+    let pool = open_pool(&database_path).await?;
     migrate(&pool).await?;
     let response = capture_health_inner(
         &pool,
@@ -500,7 +607,8 @@ async fn capture_health_cli(args: CaptureHealthArgs) -> Result<()> {
 }
 
 async fn request_content_cli(args: RequestContentArgs) -> Result<()> {
-    let pool = open_pool(&args.db).await?;
+    let database_path = configured_database_path(args.db)?;
+    let pool = open_pool(&database_path).await?;
     migrate(&pool).await?;
     let parts = args
         .parts
@@ -524,7 +632,8 @@ async fn request_content_cli(args: RequestContentArgs) -> Result<()> {
 }
 
 async fn cleanup_cli(args: CleanupArgs) -> Result<()> {
-    let pool = open_pool(&args.db).await?;
+    let database_path = configured_database_path(args.db)?;
+    let pool = open_pool(&database_path).await?;
     migrate(&pool).await?;
     cleanup_retention(&pool, args.now_ms.unwrap_or_else(now_ms)).await?;
     println!("{}", serde_json::to_string_pretty(&SimpleOk { ok: true })?);
@@ -2235,6 +2344,44 @@ mod tests {
     use tower::ServiceExt;
 
     use super::*;
+
+    #[test]
+    fn no_arguments_select_server_mode() {
+        let cli = Cli::try_parse_from(["codexwatch-server"]).expect("cli");
+        assert!(cli.command.is_none());
+    }
+
+    #[test]
+    fn server_config_parses_minimal_file() {
+        let config: ServerConfig = toml::from_str(
+            r#"
+                listen = "127.0.0.1:18080"
+                database_path = "/var/lib/codexwatch-server/server.db"
+            "#,
+        )
+        .expect("config");
+        assert_eq!(config.listen, "127.0.0.1:18080".parse().expect("address"));
+        assert_eq!(
+            config.database_path,
+            PathBuf::from("/var/lib/codexwatch-server/server.db")
+        );
+    }
+
+    #[test]
+    fn server_config_path_honors_user_home() {
+        let path = resolve_server_config_path(false, None, None, Some(Path::new("/home/alice")));
+        assert_eq!(
+            path,
+            PathBuf::from("/home/alice/.config/codexwatch/server.toml")
+        );
+    }
+
+    #[test]
+    fn server_config_path_rejects_root_as_user_home() {
+        let path =
+            resolve_server_config_path(false, None, Some(Path::new("")), Some(Path::new("/")));
+        assert_eq!(path, PathBuf::from("/etc/codexwatch/server.toml"));
+    }
 
     struct Harness {
         _dir: TempDir,

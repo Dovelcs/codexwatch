@@ -273,7 +273,7 @@ fn partial_ebpf_configuration_is_rejected() {
     let mut cfg = config(&dir, "http://127.0.0.1:1".into());
     cfg.ebpf_object_path = Some(dir.path().join("capture-ebpf.o"));
     let err = cfg.validate_ebpf_config().expect_err("must fail");
-    assert!(err.to_string().contains("CODEXWATCH_CODEX_BINARY"));
+    assert!(err.to_string().contains("codex_binary_path"));
 }
 
 #[tokio::test]

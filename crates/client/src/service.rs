@@ -406,7 +406,7 @@ impl ClientService {
 #[command(about = "CodexWatch passive monitoring client")]
 pub struct Cli {
     #[command(subcommand)]
-    pub command: CliCommand,
+    pub command: Option<CliCommand>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -430,9 +430,9 @@ pub async fn run_cli(cli: Cli) -> Result<()> {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .try_init()
         .ok();
-    let config = ClientConfig::from_env()?;
+    let config = ClientConfig::load()?;
     let service = ClientService::open(config).await?;
-    match cli.command {
+    match cli.command.unwrap_or(CliCommand::Daemon { once: false }) {
         CliCommand::Daemon { once } => {
             if once {
                 service.run_once().await?;
@@ -564,5 +564,18 @@ async fn run_process_source_loop(
                 backoff_seconds = (backoff_seconds * 2).min(30);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod cli_tests {
+    use clap::Parser as _;
+
+    use super::*;
+
+    #[test]
+    fn no_arguments_select_daemon_mode() {
+        let cli = Cli::try_parse_from(["codexwatch-client"]).expect("cli");
+        assert!(cli.command.is_none());
     }
 }
